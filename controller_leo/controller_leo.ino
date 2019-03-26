@@ -12,6 +12,15 @@
 #define KP_THROTTLE 0.07
 #define KI_THROTTLE 0.04
 
+// Set up POT read
+int pot_KP = A0;
+int pot_KI = A1;
+int pot_KD = A2;
+
+int var_KP = 0;
+int var_KI = 0;
+int var_KD = 0;
+
 #define MAX_CONTROL_OUTPUT 10
 
 #define ZERO_SPEED 65535
@@ -547,6 +556,11 @@ void loop()
     int16_t estimated_speed = -actual_robot_speed_Old - angular_velocity;                       // We use robot_speed(t-1) or (t-2) to compensate the delay
     estimated_speed_filtered = estimated_speed_filtered * 0.95 + (float)estimated_speed * 0.05; // low pass filter on estimated speed
 
+    // Read POTs for KP,KI,KD
+    var_KP = analogRead(pot_KP); //Attached to A0
+    var_KI = analogRead(pot_KI); // Attached to A1
+    var_KD = analogRead(pot_KD); // Attached to A2
+    
     // SPEED CONTROL: This is a PI controller.
     //    input:user throttle, variable: estimated robot speed, output: target robot angle to get the desired speed
     target_angle = speedPIControl(dt, estimated_speed_filtered, throttle, Kp_thr, Ki_thr);
