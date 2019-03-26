@@ -7,12 +7,12 @@
 #define MAX_TARGET_ANGLE 12
 
 // Default control terms
-#define KP 0.19
-#define KD 28
+#define KP 0.28
+#define KD 0.5
 #define KP_THROTTLE 0.07
 #define KI_THROTTLE 0.04
 
-#define MAX_CONTROL_OUTPUT 50
+#define MAX_CONTROL_OUTPUT 10
 
 #define ZERO_SPEED 65535
 #define MAX_ACCEL 7
@@ -26,12 +26,12 @@
 #define ITERM_MAX_ERROR 25 // Iterm windup constants for PI control //40
 #define ITERM_MAX 8000
 
-#define CALIBRATION_TIME 5
+#define CALIBRATION_TIME 10
 
-int MOTOR1_STEP_PIN = 6;
+int MOTOR1_STEP_PIN = 7;
 int MOTOR2_STEP_PIN = 12;
 int MOTOR1_DIR_PIN = 8;
-int MOTOR2_DIR_PIN = 13;
+int MOTOR2_DIR_PIN = 5;
 
 // Components
 MPU6050 mpu;
@@ -457,14 +457,7 @@ void setup()
 
   Serial.println("GYRO CALIBRATION");
   Serial.println("\tBEGIN");
-  for (int count = 0; count < CALIBRATION_TIME; count++)
-    ;
-  {
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(500);
-  }
+  delay(10000);
   Serial.println("\tDONE");
 
   for (int i = 0; i < 2; i++)

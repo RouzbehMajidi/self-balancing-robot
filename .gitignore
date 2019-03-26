@@ -54,3 +54,4 @@ dkms.conf
 # Other
 .vscode/
 .DS_Store
+data/

@@ -2,17 +2,22 @@
 #include <I2Cdev.h>
 #include <JJ_MPU6050_DMP_6Axis.h>
 
-#define MAX_THROTTLE 50
+#define MAX_THROTTLE 20
 #define MAX_STEERING 150
 #define MAX_TARGET_ANGLE 12
 
 // Default control terms
-#define KP 0.19
-#define KD 28
-#define KP_THROTTLE 0.07
-#define KI_THROTTLE 0.04
+//#define KP 0.19
+//#define KD 29
+//#define KP_THROTTLE 0.07
+//#define KI_THROTTLE 0.12
 
-#define MAX_CONTROL_OUTPUT 50
+#define KP 5.4
+#define KD 160
+#define KP_THROTTLE 1
+#define KI_THROTTLE 6
+
+#define MAX_CONTROL_OUTPUT 20
 
 #define ZERO_SPEED 65535
 #define MAX_ACCEL 7
@@ -22,6 +27,7 @@
 #define I2C_SPEED 400000L
 #define RAD2GRAD 57.2957795
 #define GRAD2RAD 0.01745329251994329576923690768489
+#define ALPHA 0.5
 
 #define ITERM_MAX_ERROR 25 // Iterm windup constants for PI control //40
 #define ITERM_MAX 8000
@@ -29,8 +35,9 @@
 #define CALIBRATION_TIME 5
 
 int MOTOR1_STEP_PIN = 6;
-int MOTOR2_STEP_PIN = 12;
 int MOTOR1_DIR_PIN = 8;
+
+int MOTOR2_STEP_PIN = 12;
 int MOTOR2_DIR_PIN = 13;
 
 // Components
@@ -101,7 +108,9 @@ float dmpGetPhi()
   mpu.getFIFOBytes(fifoBuffer, 16);
   mpu.dmpGetQuaternion(&q, fifoBuffer);
   mpu.resetFIFO();
-  return (atan2(2 * (q.y * q.z + q.w * q.x), q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z) * RAD2GRAD);
+  float current_angle = (atan2(2 * (q.y * q.z + q.w * q.x), q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z) * RAD2GRAD);
+  float complementary_filter_angle = ALPHA*current_angle + (1-ALPHA)*angle_adjusted_Old;
+  return complementary_filter_angle;
 }
 
 // COMPENSATOR
@@ -113,7 +122,7 @@ float stabilityPDControl(float DT, float input, float setPoint, float Kp, float 
   error = setPoint - input;
 
   output = Kp * error + (Kd * (setPoint - setPointOld) - Kd * (input - PID_errorOld2)) / DT;
-  Serial.println("Stability Control output: " + String(Kd * (error - PID_errorOld)));
+//  Serial.println("Stability Control output: " + String(Kd * (error - PID_errorOld)));
 
   PID_errorOld2 = PID_errorOld;
   PID_errorOld = input;
@@ -129,8 +138,8 @@ float speedPIControl(float DT, float input, float setPoint, float Kp, float Ki)
   error = setPoint - input;
   PID_errorSum += constrain(error, -ITERM_MAX_ERROR, ITERM_MAX_ERROR);
   PID_errorSum = constrain(PID_errorSum, -ITERM_MAX, ITERM_MAX);
-
-  Serial.println("PID Error Output: " + String(PID_errorSum));
+//
+//  Serial.println("PID Error Output: " + String(PID_errorSum));
 
   output = Kp * error + Ki * PID_errorSum * DT * 0.001;
   return (output);
@@ -382,18 +391,6 @@ void setup()
 
   delay(500);
 
-  Serial.println("GYRO CALIBRATION");
-  Serial.println("\tBEGIN");
-  for (int count = 0; count < CALIBRATION_TIME; count++)
-    ;
-  {
-    digitalWrite(LED_BUILTIN, HIGH);
-    delay(500);
-    digitalWrite(LED_BUILTIN, LOW);
-    delay(500);
-  }
-  Serial.println("\tDONE");
-
   for (int i = 0; i < 2; i++)
   {
     digitalWrite(LED_BUILTIN, HIGH);
@@ -423,16 +420,13 @@ void setup()
   dmpSetSensorFusionAccelGain(0x20);
   delay(200);
 
-  Serial.println("STEPPER MOTOR TEST");
-  Serial.println("\tBEGIN");
-  for (int k = 0; k < 5; k++)
-  {
-    setMotorSpeed(5, -5);
-    delay(200);
-    setMotorSpeed(-5, 5);
-    delay(200);
-  }
-  Serial.println("\tDONE");
+//  Serial.println("STEPPER MOTOR TEST");
+////  Serial.println("\tBEGIN");
+////  setMotorSpeed(5, -5);
+////  delay(500);
+////  setMotorSpeed(-5, 5);
+////  delay(500);
+//  Serial.println("\tDONE");
 
   Serial.println("START");
   mpu.resetFIFO();
@@ -463,9 +457,9 @@ void loop()
     angle_adjusted_Old = angle_adjusted;
     angle_adjusted = dmpGetPhi();
 
-    Serial.print("Throttle: " + String(throttle) + " \n");
-    Serial.print("Angle: " + String(angle_adjusted) + " \n");
-
+//    Serial.print("Throttle: " + String(throttle) + " \n");
+//    Serial.print("Angle: " + String(angle_adjusted) + " \n");
+    
     mpu.resetFIFO();
 
     actual_robot_speed_Old = actual_robot_speed;
@@ -477,11 +471,11 @@ void loop()
 
     // SPEED CONTROL: This is a PI controller.
     //    input:user throttle, variable: estimated robot speed, output: target robot angle to get the desired speed
-    target_angle = speedPIControl(dt, estimated_speed_filtered, throttle, Kp_thr, Ki_thr);
+    target_angle = speedPIControl(dt, 0, throttle, Kp_thr, Ki_thr);
     target_angle = constrain(target_angle, -max_target_angle, max_target_angle); // limited output
 
-    Serial.print("Estimate filtered speed: " + String(estimated_speed_filtered) + " \n");
-    Serial.print("Target Angle: " + String(target_angle) + " \n");
+//    Serial.print("Estimate filtered speed: " + String(estimated_speed_filtered) + " \n");
+//    Serial.print("Target Angle: " + String(target_angle) + " \n");
 
     // Stability control: This is a PD controller.
     //    input: robot target angle(from SPEED CONTROL), variable: robot angle, output: Motor speed
@@ -497,10 +491,12 @@ void loop()
     motor1 = constrain(motor1, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT);
     motor2 = constrain(motor2, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT);
 
-    Serial.print("Motor 1: " + String(motor1) + " \n");
-    Serial.print("Motor 2: " + String(motor1) + " \n");
+//    Serial.print("Motor 1: " + String(motor1) + " \n");
+//    Serial.print("Motor 2: " + String(motor1) + " \n");
 
-    if ((angle_adjusted < 76) && (angle_adjusted > -76)) // Is robot ready (upright?)
+    Serial.println(String(target_angle) + " " + String(angle_adjusted));
+
+    if ((angle_adjusted < 50) && (angle_adjusted > -50)) // Is robot ready (upright?)
     {
       // NORMAL MODE
       setMotorSpeed(motor1, motor2);
