@@ -2,20 +2,16 @@
 #include <I2Cdev.h>
 #include <JJ_MPU6050_DMP_6Axis.h>
 
-#define MAX_THROTTLE 20
-#define MAX_STEERING 150
-#define MAX_TARGET_ANGLE 12
+#define TARGET_ANGLE 0F
 
-// Default control terms
-//#define KP 0.19
-//#define KD 29
-//#define KP_THROTTLE 0.07
-//#define KI_THROTTLE 0.12
+#define ALPHA 0.3
+#define KP 1
+#define KI 0
+#define KD 50
 
-#define KP 5.4
-#define KD 160
-#define KP_THROTTLE 1
-#define KI_THROTTLE 6
+#define MAX_KP 10
+#define MAX_KI 300
+#define MAX_KD 10
 
 #define MAX_CONTROL_OUTPUT 20
 
@@ -27,18 +23,23 @@
 #define I2C_SPEED 400000L
 #define RAD2GRAD 57.2957795
 #define GRAD2RAD 0.01745329251994329576923690768489
-#define ALPHA 0.5
 
 #define ITERM_MAX_ERROR 25 // Iterm windup constants for PI control //40
 #define ITERM_MAX 8000
 
 #define CALIBRATION_TIME 5
 
-int MOTOR1_STEP_PIN = 6;
-int MOTOR1_DIR_PIN = 8;
+#define ADC_RESOLUTION 1023
 
-int MOTOR2_STEP_PIN = 12;
-int MOTOR2_DIR_PIN = 13;
+#define MOTOR1_STEP_PIN 6
+#define MOTOR1_DIR_PIN 8
+
+#define MOTOR2_STEP_PIN 12
+#define MOTOR2_DIR_PIN 13
+
+#define KP_POT_PIN A0
+#define KI_POT_PIN A1
+#define KD_POT_PIN A2
 
 // Components
 MPU6050 mpu;
@@ -46,8 +47,15 @@ MPU6050 mpu;
 int16_t motor1;
 int16_t motor2;
 
+float battery;
+
 //Control System vars
 uint8_t mode;
+
+float var_KP = KP;
+float var_KI = KI;
+float var_KD = KD;
+	
 
 long timer_old;
 long timer_value;
@@ -83,13 +91,7 @@ float setPointOld = 0;
 float target_angle;
 float throttle;
 float steering;
-float max_throttle = MAX_THROTTLE;
-float max_steering = MAX_STEERING;
-float max_target_angle = MAX_TARGET_ANGLE;
 float control_output;
-
-float Kp_thr = KP_THROTTLE;
-float Ki_thr = KI_THROTTLE;
 
 // DMP FUNCTIONS
 void dmpSetSensorFusionAccelGain(uint8_t gain)
@@ -113,36 +115,20 @@ float dmpGetPhi()
   return complementary_filter_angle;
 }
 
-// COMPENSATOR
-float stabilityPDControl(float DT, float input, float setPoint, float Kp, float Kd)
-{
-  float error;
-  float output;
+float pid(float DT, float input, float setPoint){
 
-  error = setPoint - input;
+  float error = setPoint - input;
+  PID_errorSum += constrain(error, -ITERM_MAX_ERROR, ITERM_MAX_ERROR);
+  PID_errorSum = constrain(PID_errorSum, -ITERM_MAX, ITERM_MAX);
 
-  output = Kp * error + (Kd * (setPoint - setPointOld) - Kd * (input - PID_errorOld2)) / DT;
-//  Serial.println("Stability Control output: " + String(Kd * (error - PID_errorOld)));
+
+  float output = KP*error + ((KD * (setPoint - setPointOld) - KD * (input - PID_errorOld2)) / DT ) + KI * PID_errorSum * DT * 0.001;
 
   PID_errorOld2 = PID_errorOld;
   PID_errorOld = input;
   setPointOld = setPoint;
-  return (output);
-}
 
-float speedPIControl(float DT, float input, float setPoint, float Kp, float Ki)
-{
-  float error;
-  float output;
-
-  error = setPoint - input;
-  PID_errorSum += constrain(error, -ITERM_MAX_ERROR, ITERM_MAX_ERROR);
-  PID_errorSum = constrain(PID_errorSum, -ITERM_MAX, ITERM_MAX);
-//
-//  Serial.println("PID Error Output: " + String(PID_errorSum));
-
-  output = Kp * error + Ki * PID_errorSum * DT * 0.001;
-  return (output);
+  return output;
 }
 
 void delay_1us()
@@ -335,6 +321,27 @@ void SIG_INIT_ERROR()
   }
 }
 
+void updateGains(){
+
+  int kp = analogRead(KP_POT_PIN);
+  int ki = analogRead(KI_POT_PIN);
+  int kd = analogRead(KD_POT_PIN);
+
+  if(kp != 0 && ki != 0 && kd != 0){ 
+    var_KP = (kp / float(ADC_RESOLUTION))*MAX_KP;
+    var_KI = (ki / float(ADC_RESOLUTION))*MAX_KI;
+    var_KD = (kd / float(ADC_RESOLUTION))*MAX_KD;
+  }else{
+    var_KP = KP;
+    var_KI = KI_THROTTLE;
+    var_KD = KD;
+  }
+
+//
+//  Serial.println(String(kp) + ":" + String(var_KP) + " " + String(ki) + ":" + String(var_KI) + " " + String(kd) + ":" + String(var_KD));
+
+}
+
 void setup()
 {
   pinMode(MOTOR1_STEP_PIN, OUTPUT); // STEP MOTOR 1
@@ -439,6 +446,8 @@ void loop()
 {
   digitalWrite(LED_BUILTIN, LOW);
 
+  updateGains();
+
   debug_counter++;
   timer_value = millis();
 
@@ -462,25 +471,18 @@ void loop()
     
     mpu.resetFIFO();
 
-    actual_robot_speed_Old = actual_robot_speed;
-    actual_robot_speed = (speed_M1 + speed_M2) / 2;
+    // actual_robot_speed_Old = actual_robot_speed;
+    // actual_robot_speed = (speed_M1 + speed_M2) / 2;
 
-    int16_t angular_velocity = (angle_adjusted - angle_adjusted_Old) * 90.0;                    // 90 is an empirical extracted factor to adjust for real units
-    int16_t estimated_speed = -actual_robot_speed_Old - angular_velocity;                       // We use robot_speed(t-1) or (t-2) to compensate the delay
-    estimated_speed_filtered = estimated_speed_filtered * 0.95 + (float)estimated_speed * 0.05; // low pass filter on estimated speed
-
-    // SPEED CONTROL: This is a PI controller.
-    //    input:user throttle, variable: estimated robot speed, output: target robot angle to get the desired speed
-    target_angle = speedPIControl(dt, 0, throttle, Kp_thr, Ki_thr);
-    target_angle = constrain(target_angle, -max_target_angle, max_target_angle); // limited output
+    // int16_t angular_velocity = (angle_adjusted - angle_adjusted_Old) * 90.0;                    // 90 is an empirical extracted factor to adjust for real units
+    // int16_t estimated_speed = -actual_robot_speed_Old - angular_velocity;                       // We use robot_speed(t-1) or (t-2) to compensate the delay
+    // estimated_speed_filtered = estimated_speed_filtered * 0.95 + (float)estimated_speed * 0.05; // low pass filter on estimated speed
 
 //    Serial.print("Estimate filtered speed: " + String(estimated_speed_filtered) + " \n");
 //    Serial.print("Target Angle: " + String(target_angle) + " \n");
 
-    // Stability control: This is a PD controller.
-    //    input: robot target angle(from SPEED CONTROL), variable: robot angle, output: Motor speed
-    //    We integrate the output (sumatory), so the output is really the motor acceleration, not motor speed.
-    control_output += stabilityPDControl(dt, angle_adjusted, target_angle, Kp, Kd);
+    // Stability control: This is a PID controller.
+    control_output += pid(dt, angle_adjusted, TARGET_ANGLE);
     control_output = constrain(control_output, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT); // Limit max output from control
 
     // The steering part from the user is injected directly on the output
@@ -494,7 +496,9 @@ void loop()
 //    Serial.print("Motor 1: " + String(motor1) + " \n");
 //    Serial.print("Motor 2: " + String(motor1) + " \n");
 
-    Serial.println(String(target_angle) + " " + String(angle_adjusted));
+    Serial.println(String(var_KP) + " " + String(var_KI) + " " + String(var_KD) + " " + String(target_angle) + " " + String(angle_adjusted));
+    readBattery();
+    Serial.println("BATTERY: " + String(battery) + "%");
 
     if ((angle_adjusted < 50) && (angle_adjusted > -50)) // Is robot ready (upright?)
     {
@@ -511,3 +515,9 @@ void loop()
     }
   }
 }
+
+void readBattery()
+{
+  battery = (battery*9 + (analogRead(5)/8))/10; // output : Battery voltage*10 (aprox) and filtered
+}
+
