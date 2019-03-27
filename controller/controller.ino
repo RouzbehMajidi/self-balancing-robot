@@ -447,7 +447,7 @@ void loop()
     else // Robot not ready (flat), angle > 70º => ROBOT OFF
     {
       Serial.println("--------------- ROBOT OUT OF BOUNDS ---------------");
-      setMotorSpeed(0, 0);
+      setMotorSpeed(0);
       digitalWrite(LED_BUILTIN, HIGH);
       PID_errorSum = 0; // Reset PID I term
     }
