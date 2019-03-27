@@ -37,10 +37,6 @@
 #define MOTOR2_STEP_PIN 12
 #define MOTOR2_DIR_PIN 13
 
-#define KP_POT_PIN A0
-#define KI_POT_PIN A1
-#define KD_POT_PIN A2
-
 // Components
 MPU6050 mpu;
 
@@ -51,11 +47,6 @@ float battery;
 
 //Control System vars
 uint8_t mode;
-
-float var_KP = KP;
-float var_KI = KI;
-float var_KD = KD;
-	
 
 long timer_old;
 long timer_value;
@@ -82,15 +73,13 @@ Quaternion q;
 
 float angle_adjusted;
 float angle_adjusted_Old;
-float Kp = KP;
-float Kd = KD;
+
 float PID_errorSum;
 float PID_errorOld = 0;
 float PID_errorOld2 = 0;
 float setPointOld = 0;
+
 float target_angle;
-float throttle;
-float steering;
 float control_output;
 
 // DMP FUNCTIONS
@@ -321,27 +310,6 @@ void SIG_INIT_ERROR()
   }
 }
 
-void updateGains(){
-
-  int kp = analogRead(KP_POT_PIN);
-  int ki = analogRead(KI_POT_PIN);
-  int kd = analogRead(KD_POT_PIN);
-
-  if(kp != 0 && ki != 0 && kd != 0){ 
-    var_KP = (kp / float(ADC_RESOLUTION))*MAX_KP;
-    var_KI = (ki / float(ADC_RESOLUTION))*MAX_KI;
-    var_KD = (kd / float(ADC_RESOLUTION))*MAX_KD;
-  }else{
-    var_KP = KP;
-    var_KI = KI_THROTTLE;
-    var_KD = KD;
-  }
-
-//
-//  Serial.println(String(kp) + ":" + String(var_KP) + " " + String(ki) + ":" + String(var_KI) + " " + String(kd) + ":" + String(var_KD));
-
-}
-
 void setup()
 {
   pinMode(MOTOR1_STEP_PIN, OUTPUT); // STEP MOTOR 1
@@ -417,6 +385,8 @@ void setup()
     Serial.println("\tMPU6050: ERROR");
   }
 
+  delay(10000);
+
   timer_old = millis();
 
   Serial.println("STEPPER MOTOR INITIALIZATION");
@@ -446,8 +416,6 @@ void loop()
 {
   digitalWrite(LED_BUILTIN, LOW);
 
-  updateGains();
-
   debug_counter++;
   timer_value = millis();
 
@@ -470,16 +438,6 @@ void loop()
 //    Serial.print("Angle: " + String(angle_adjusted) + " \n");
     
     mpu.resetFIFO();
-
-    // actual_robot_speed_Old = actual_robot_speed;
-    // actual_robot_speed = (speed_M1 + speed_M2) / 2;
-
-    // int16_t angular_velocity = (angle_adjusted - angle_adjusted_Old) * 90.0;                    // 90 is an empirical extracted factor to adjust for real units
-    // int16_t estimated_speed = -actual_robot_speed_Old - angular_velocity;                       // We use robot_speed(t-1) or (t-2) to compensate the delay
-    // estimated_speed_filtered = estimated_speed_filtered * 0.95 + (float)estimated_speed * 0.05; // low pass filter on estimated speed
-
-//    Serial.print("Estimate filtered speed: " + String(estimated_speed_filtered) + " \n");
-//    Serial.print("Target Angle: " + String(target_angle) + " \n");
 
     // Stability control: This is a PID controller.
     control_output += pid(dt, angle_adjusted, TARGET_ANGLE);
