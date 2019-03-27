@@ -2,12 +2,12 @@
 #include <I2Cdev.h>
 #include <JJ_MPU6050_DMP_6Axis.h>
 
-#define TARGET_ANGLE 0F
+#define TARGET_ANGLE 0.0
 
 #define ALPHA 0.3
 #define KP 1
-#define KI 0
-#define KD 50
+#define KI 0.1
+#define KD 100
 
 #define MAX_KP 10
 #define MAX_KI 300
@@ -444,20 +444,16 @@ void loop()
     control_output = constrain(control_output, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT); // Limit max output from control
 
     // The steering part from the user is injected directly on the output
-    motor1 = control_output + steering;
-    motor2 = control_output - steering;
-
-    // Limit max speed (control output)
-    motor1 = constrain(motor1, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT);
-    motor2 = constrain(motor2, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT);
+    motor1 = control_output;
+    motor2 = control_output;
 
 //    Serial.print("Motor 1: " + String(motor1) + " \n");
 //    Serial.print("Motor 2: " + String(motor1) + " \n");
 
-    Serial.println(String(var_KP) + " " + String(var_KI) + " " + String(var_KD) + " " + String(target_angle) + " " + String(angle_adjusted));
     readBattery();
-    Serial.println("BATTERY: " + String(battery) + "%");
-
+    Serial.println(String(angle_adjusted));
+    //Serial.println("BATTERY: " + String(battery) + "%");
+  
     if ((angle_adjusted < 50) && (angle_adjusted > -50)) // Is robot ready (upright?)
     {
       // NORMAL MODE
