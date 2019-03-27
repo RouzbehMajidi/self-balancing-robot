@@ -100,18 +100,18 @@ float dmpGetPhi()
   mpu.dmpGetQuaternion(&q, fifoBuffer);
   mpu.resetFIFO();
   float current_angle = (atan2(2 * (q.y * q.z + q.w * q.x), q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z) * RAD2GRAD);
-  float complementary_filter_angle = ALPHA*current_angle + (1-ALPHA)*angle_adjusted_Old;
+  float complementary_filter_angle = ALPHA * current_angle + (1 - ALPHA) * angle_adjusted_Old;
   return complementary_filter_angle;
 }
 
-float pid(float DT, float input, float setPoint){
+float pid(float DT, float input, float setPoint)
+{
 
   float error = setPoint - input;
   PID_errorSum += constrain(error, -ITERM_MAX_ERROR, ITERM_MAX_ERROR);
   PID_errorSum = constrain(PID_errorSum, -ITERM_MAX, ITERM_MAX);
 
-
-  float output = KP*error + ((KD * (setPoint - setPointOld) - KD * (input - PID_errorOld2)) / DT ) + KI * PID_errorSum * DT * 0.001;
+  float output = KP * error + ((KD * (setPoint - setPointOld) - KD * (input - PID_errorOld2)) / DT) + KI * PID_errorSum * DT * 0.001;
 
   PID_errorOld2 = PID_errorOld;
   PID_errorOld = input;
@@ -221,25 +221,25 @@ void init_motors()
   TIMSK1 = B00000110;
 }
 
-void setMotorSpeed(int16_t tspeed_M1, int16_t tspeed_M2)
+void setMotorSpeed(float controlInput)
 {
   long timer_period_1, timer_period_2;
   int16_t speed_1, speed_2;
   int8_t dir_1, dir_2;
 
-  if ((speed_M1 - tspeed_M1) > MAX_ACCEL)
+  if ((speed_M1 - controlInput) > MAX_ACCEL)
     speed_M1 -= MAX_ACCEL;
-  else if ((speed_M1 - tspeed_M1) < -MAX_ACCEL)
+  else if ((speed_M1 - controlInput) < -MAX_ACCEL)
     speed_M1 += MAX_ACCEL;
   else
-    speed_M1 = tspeed_M1;
+    speed_M1 = controlInput;
 
-  if ((speed_M2 - tspeed_M2) > MAX_ACCEL)
+  if ((speed_M2 - controlInput) > MAX_ACCEL)
     speed_M2 -= MAX_ACCEL;
-  else if ((speed_M2 - tspeed_M2) < -MAX_ACCEL)
+  else if ((speed_M2 - controlInput) < -MAX_ACCEL)
     speed_M2 += MAX_ACCEL;
   else
-    speed_M2 = tspeed_M2;
+    speed_M2 = controlInput;
 
 #if MICROSTEPPING == 16
   speed_1 = speed_M1 * 46; // Adjust factor from control output speed to real motor speed in steps/second
@@ -397,14 +397,6 @@ void setup()
   dmpSetSensorFusionAccelGain(0x20);
   delay(200);
 
-//  Serial.println("STEPPER MOTOR TEST");
-////  Serial.println("\tBEGIN");
-////  setMotorSpeed(5, -5);
-////  delay(500);
-////  setMotorSpeed(-5, 5);
-////  delay(500);
-//  Serial.println("\tDONE");
-
   Serial.println("START");
   mpu.resetFIFO();
   timer_old = millis();
@@ -420,13 +412,13 @@ void loop()
   timer_value = millis();
 
   fifoCount = mpu.getFIFOCount();
-  if (fifoCount >= 18)
-  {
-    if (fifoCount > 18)
-    {
-      mpu.resetFIFO();
-      return;
-    }
+  // if (fifoCount >= 18)
+  // {
+  //   // if (fifoCount > 18)
+  //   // {
+  //   //   mpu.resetFIFO();
+  //   //   return;
+  //   // }
 
     dt = (timer_value - timer_old);
     timer_old = timer_value;
@@ -434,30 +426,22 @@ void loop()
     angle_adjusted_Old = angle_adjusted;
     angle_adjusted = dmpGetPhi();
 
-//    Serial.print("Throttle: " + String(throttle) + " \n");
-//    Serial.print("Angle: " + String(angle_adjusted) + " \n");
-    
+    //    Serial.println(angle_adjusted);
+
     mpu.resetFIFO();
 
     // Stability control: This is a PID controller.
     control_output += pid(dt, angle_adjusted, TARGET_ANGLE);
     control_output = constrain(control_output, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT); // Limit max output from control
 
-    // The steering part from the user is injected directly on the output
-    motor1 = control_output;
-    motor2 = control_output;
-
-//    Serial.print("Motor 1: " + String(motor1) + " \n");
-//    Serial.print("Motor 2: " + String(motor1) + " \n");
-
     readBattery();
     Serial.println(String(angle_adjusted));
     //Serial.println("BATTERY: " + String(battery) + "%");
-  
+
     if ((angle_adjusted < 50) && (angle_adjusted > -50)) // Is robot ready (upright?)
     {
       // NORMAL MODE
-      setMotorSpeed(motor1, motor2);
+      setMotorSpeed(control_output);
       digitalWrite(LED_BUILTIN, LOW);
     }
     else // Robot not ready (flat), angle > 70º => ROBOT OFF
@@ -467,11 +451,10 @@ void loop()
       digitalWrite(LED_BUILTIN, HIGH);
       PID_errorSum = 0; // Reset PID I term
     }
-  }
+  // }
 }
 
 void readBattery()
 {
-  battery = (battery*9 + (analogRead(5)/8))/10; // output : Battery voltage*10 (aprox) and filtered
+  battery = (battery * 9 + (analogRead(5) / 8)) / 10; // output : Battery voltage*10 (aprox) and filtered
 }
-
