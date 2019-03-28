@@ -7,24 +7,27 @@
 #define I2C_SPEED 400000L
 #define RAD2GRAD 57.2957795
 #define GRAD2RAD 0.01745329251994329576923690768489
-#define GYRO_CALIBRATION_TIME 10000 //ms
+#define GYRO_CALIBRATION_TIME 20000 //ms
 
 // Control
 #define TARGET_ANGLE 0.0
-#define ANGLE_TOLERANCE 50
+#define ANGLE_TOLERANCE 0.1
+#define MAX_ANGLE 50
+#define L1_ANGLE_RANGE 10
 
-#define MICROSTEPPING 1
+#define MICROSTEPPING 16
 
 #define MAX_ACCEL 7
-#define MAX_CONTROL_OUTPUT 300
+#define MAX_CONTROL_OUTPUT_L1 100
+#define MAX_CONTROL_OUTPUT_L2 200
 
 // Compensator
-#define ALPHA 0.5
-#define KP 0.1
-#define KI 0.001
-#define KD 10
+#define ALPHA 0.99
+#define KP 170
+#define KI 1
+#define KD 2800
 
-#define ITERM_MAX_ERROR 25
+#define ITERM_MAX_ERROR 100
 #define ITERM_MAX 8000
 
 // Motors
@@ -34,7 +37,7 @@
 #define MOTOR1_DIR_PIN 8
 
 #define MOTOR2_STEP_PIN 12
-#define MOTOR2_DIR_PIN 13
+#define MOTOR2_DIR_PIN 11
 
 // Components
 MPU6050 mpu;
@@ -59,6 +62,10 @@ uint8_t fifoBuffer[18]; // FIFO storage buffer
 Quaternion q;
 
 // PID
+float KP_current = KP;
+float KI_current = KI;
+float KD_current = KD;
+
 float PID_errorSum;
 float PID_errorOld = 0;
 float PID_errorOld2 = 0;
@@ -90,25 +97,56 @@ float dmpGetPhi()
   mpu.dmpGetQuaternion(&q, fifoBuffer);
   mpu.resetFIFO();
   float current_angle = (atan2(2 * (q.y * q.z + q.w * q.x), q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z) * RAD2GRAD);
-//  float complementary_filter_angle = ALPHA * current_angle + (1 - ALPHA) * angle_adjusted_Old;
-  return current_angle;
+  float filtered_angle = ALPHA * current_angle + (1 - ALPHA) * angle_adjusted_Old;
+  return filtered_angle;
 }
 
 float pid(float DT, float input, float setPoint)
 {
   float error;
   float output;
-  error = setPoint - input;
+
+  if(input < ANGLE_TOLERANCE && input > -ANGLE_TOLERANCE){
+    error = 0;
+  }else{
+    error = setPoint - input;
+  }
+
   PID_errorSum += constrain(error, -ITERM_MAX_ERROR, ITERM_MAX_ERROR);
   PID_errorSum = constrain(PID_errorSum, -ITERM_MAX, ITERM_MAX);
 
-  output = KP * error + ((KD * (setPoint - setPointOld) - KD * (input - PID_errorOld2)) / DT) + KI * PID_errorSum * DT * 0.001 ;
+  output = KP_current * error + ((KD_current * (setPoint - setPointOld) - KD_current * (input - PID_errorOld2)) / DT) + KI_current * PID_errorSum * DT * 0.001 ;
 
   PID_errorOld2 = PID_errorOld;
   PID_errorOld = input;
   setPointOld = setPoint;
 
   return output;
+}
+
+void pid_reset(){
+  PID_errorSum = 0;
+  PID_errorOld = 0;
+  PID_errorOld2 = 0;
+}
+
+
+void pid_update(){
+  if (Serial.available() > 0){
+    digitalWrite(MOTOR_EN_PIN, HIGH);
+    Serial.println("PID UPDATE RECEIVED");
+    KP_current = Serial.parseFloat();
+    KI_current = Serial.parseFloat();
+    KD_current = Serial.parseFloat();
+    pid_reset();
+    Serial.print("\tKP:");
+    Serial.println(KP_current);
+    Serial.print("\tKI:");
+    Serial.println(KI_current);
+    Serial.print("\tKD:");
+    Serial.println(KD_current);
+    digitalWrite(MOTOR_EN_PIN, LOW);
+  }
 }
 
 void delay_1us()
@@ -410,6 +448,8 @@ void loop()
 {
   digitalWrite(LED_BUILTIN, LOW);
 
+  pid_update();
+
   timer_value = millis();
 
   fifoCount = mpu.getFIFOCount();
@@ -430,13 +470,18 @@ void loop()
     mpu.resetFIFO();
 
     control_output += pid(dt, angle_adjusted, TARGET_ANGLE);
-    control_output = constrain(control_output, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT); // Limit max output from control
+    if(angle_adjusted < L1_ANGLE_RANGE && angle_adjusted > -L1_ANGLE_RANGE){
+      control_output = constrain(control_output, -MAX_CONTROL_OUTPUT_L1, MAX_CONTROL_OUTPUT_L1);
+    }else{
+      control_output = constrain(control_output, -MAX_CONTROL_OUTPUT_L2, MAX_CONTROL_OUTPUT_L2);
+    }
+
 
     Serial.print(angle_adjusted);
     Serial.print(" ");
     Serial.println(control_output);
 
-    if ((angle_adjusted < ANGLE_TOLERANCE) && (angle_adjusted > -ANGLE_TOLERANCE))
+    if ((angle_adjusted < MAX_ANGLE) && (angle_adjusted > -MAX_ANGLE))
     {
       digitalWrite(MOTOR_EN_PIN, LOW);
       setMotorSpeed(control_output);
