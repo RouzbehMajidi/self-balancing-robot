@@ -2,34 +2,33 @@
 #include <I2Cdev.h>
 #include <JJ_MPU6050_DMP_6Axis.h>
 
-#define TARGET_ANGLE 0.0
-
-#define ALPHA 0.3
-#define KP 1
-#define KI 0.1
-#define KD 100
-
-#define MAX_KP 10
-#define MAX_KI 300
-#define MAX_KD 10
-
-#define MAX_CONTROL_OUTPUT 20
-
+// Constants
 #define ZERO_SPEED 65535
-#define MAX_ACCEL 7
-
-#define MICROSTEPPING 8
-
 #define I2C_SPEED 400000L
 #define RAD2GRAD 57.2957795
 #define GRAD2RAD 0.01745329251994329576923690768489
+#define GYRO_CALIBRATION_TIME 10000 //ms
 
-#define ITERM_MAX_ERROR 25 // Iterm windup constants for PI control //40
+// Control
+#define TARGET_ANGLE 0.0
+#define ANGLE_TOLERANCE 50
+
+#define MICROSTEPPING 1
+
+#define MAX_ACCEL 7
+#define MAX_CONTROL_OUTPUT 300
+
+// Compensator
+#define ALPHA 0.5
+#define KP 0.1
+#define KI 0.001
+#define KD 10
+
+#define ITERM_MAX_ERROR 25
 #define ITERM_MAX 8000
 
-#define CALIBRATION_TIME 5
-
-#define ADC_RESOLUTION 1023
+// Motors
+#define MOTOR_EN_PIN 4
 
 #define MOTOR1_STEP_PIN 6
 #define MOTOR1_DIR_PIN 8
@@ -40,47 +39,38 @@
 // Components
 MPU6050 mpu;
 
-int16_t motor1;
-int16_t motor2;
-
-float battery;
-
-//Control System vars
-uint8_t mode;
-
+// TIMER
 long timer_old;
 long timer_value;
-int debug_counter;
-float debugVariable;
 float dt;
 
-//Robot Control vars
+// MOTORS
 int16_t speed_M1, speed_M2; // Actual speed of motors
 int8_t dir_M1, dir_M2;      // Actual direction of steppers motors
 uint16_t period_M1, period_M2;
-int16_t actual_robot_speed; // overall robot speed (measured from steppers speed)
-int16_t actual_robot_speed_Old;
-float estimated_speed_filtered;
 
-// MPU control/status vars
+// IMU 
 bool dmpReady = false;  // set true if DMP init was successful
 uint8_t mpuIntStatus;   // holds actual interrupt status byte from MPU
 uint8_t devStatus;      // return status after each device operation (0 = success, !0 = error)
-uint16_t packetSize;    // expected DMP packet size (for us 18 bytes)
+uint16_t packetSize;    // expected DMP packet size
 uint16_t fifoCount;     // count of all bytes currently in FIFO
 uint8_t fifoBuffer[18]; // FIFO storage buffer
 Quaternion q;
 
-float angle_adjusted;
-float angle_adjusted_Old;
-
+// PID
 float PID_errorSum;
 float PID_errorOld = 0;
 float PID_errorOld2 = 0;
 float setPointOld = 0;
 
+// CONTROL
+float angle_adjusted;
+float angle_adjusted_Old;
+
 float target_angle;
 float control_output;
+
 
 // DMP FUNCTIONS
 void dmpSetSensorFusionAccelGain(uint8_t gain)
@@ -100,18 +90,19 @@ float dmpGetPhi()
   mpu.dmpGetQuaternion(&q, fifoBuffer);
   mpu.resetFIFO();
   float current_angle = (atan2(2 * (q.y * q.z + q.w * q.x), q.w * q.w - q.x * q.x - q.y * q.y + q.z * q.z) * RAD2GRAD);
-  float complementary_filter_angle = ALPHA * current_angle + (1 - ALPHA) * angle_adjusted_Old;
-  return complementary_filter_angle;
+//  float complementary_filter_angle = ALPHA * current_angle + (1 - ALPHA) * angle_adjusted_Old;
+  return current_angle;
 }
 
 float pid(float DT, float input, float setPoint)
 {
-
-  float error = setPoint - input;
+  float error;
+  float output;
+  error = setPoint - input;
   PID_errorSum += constrain(error, -ITERM_MAX_ERROR, ITERM_MAX_ERROR);
   PID_errorSum = constrain(PID_errorSum, -ITERM_MAX, ITERM_MAX);
 
-  float output = KP * error + ((KD * (setPoint - setPointOld) - KD * (input - PID_errorOld2)) / DT) + KI * PID_errorSum * DT * 0.001;
+  output = KP * error + ((KD * (setPoint - setPointOld) - KD * (input - PID_errorOld2)) / DT) + KI * PID_errorSum * DT * 0.001 ;
 
   PID_errorOld2 = PID_errorOld;
   PID_errorOld = input;
@@ -241,11 +232,14 @@ void setMotorSpeed(float controlInput)
   else
     speed_M2 = controlInput;
 
-#if MICROSTEPPING == 16
+#if MICROSTEPPING == 16 // 1/16
   speed_1 = speed_M1 * 46; // Adjust factor from control output speed to real motor speed in steps/second
   speed_2 = speed_M2 * 46;
-#else
-  speed_1 = speed_M1 * 23; // 1/8 Microstepping
+#elif MICROSTEPPING == 8 // 1/8
+  speed_1 = speed_M1 * 23;
+  speed_2 = speed_M2 * 23;
+#elif MICROSTEPPING == 1 // Full
+  speed_1 = speed_M1 * 23;
   speed_2 = speed_M2 * 23;
 #endif
   if (speed_1 == 0)
@@ -316,6 +310,9 @@ void setup()
   pinMode(MOTOR1_DIR_PIN, OUTPUT);  // DIR MOTOR 1
   pinMode(MOTOR2_STEP_PIN, OUTPUT); // STEP MOTOR 2
   pinMode(MOTOR2_DIR_PIN, OUTPUT);  // DIR MOTOR 2
+  pinMode(MOTOR_EN_PIN, OUTPUT); // EN MOTOR 1/2
+  
+  digitalWrite(MOTOR_EN_PIN, HIGH);
 
   Serial.begin(115200); // Serial output to console
 
@@ -358,7 +355,9 @@ void setup()
   {
     // 1 = initial memory load failed
     // 2 = DMP configuration updates failed
-    Serial.println("DMP ERROR (" + String(devStatus) + ")");
+    Serial.print("DMP ERROR (");
+    Serial.print(devStatus);
+    Serial.println(")");
 
     SIG_INIT_ERROR();
   }
@@ -385,7 +384,10 @@ void setup()
     Serial.println("\tMPU6050: ERROR");
   }
 
-  delay(10000);
+  Serial.println("GYRO CALIBRATION");
+  Serial.println("\tSTART");
+  delay(GYRO_CALIBRATION_TIME);
+  Serial.println("\tDONE");
 
   timer_old = millis();
 
@@ -400,7 +402,7 @@ void setup()
   Serial.println("START");
   mpu.resetFIFO();
   timer_old = millis();
-  mode = 0;
+  digitalWrite(MOTOR_EN_PIN, LOW);
 }
 
 // MAIN LOOP
@@ -408,17 +410,16 @@ void loop()
 {
   digitalWrite(LED_BUILTIN, LOW);
 
-  debug_counter++;
   timer_value = millis();
 
   fifoCount = mpu.getFIFOCount();
-  // if (fifoCount >= 18)
-  // {
-  //   // if (fifoCount > 18)
-  //   // {
-  //   //   mpu.resetFIFO();
-  //   //   return;
-  //   // }
+  if (fifoCount >= 18)
+  {
+    if (fifoCount > 18)
+    {
+      mpu.resetFIFO();
+      return;
+    }
 
     dt = (timer_value - timer_old);
     timer_old = timer_value;
@@ -426,35 +427,29 @@ void loop()
     angle_adjusted_Old = angle_adjusted;
     angle_adjusted = dmpGetPhi();
 
-    //    Serial.println(angle_adjusted);
-
     mpu.resetFIFO();
 
-    // Stability control: This is a PID controller.
     control_output += pid(dt, angle_adjusted, TARGET_ANGLE);
     control_output = constrain(control_output, -MAX_CONTROL_OUTPUT, MAX_CONTROL_OUTPUT); // Limit max output from control
 
-    readBattery();
-    Serial.println(String(angle_adjusted));
-    //Serial.println("BATTERY: " + String(battery) + "%");
+    Serial.print(angle_adjusted);
+    Serial.print(" ");
+    Serial.println(control_output);
 
-    if ((angle_adjusted < 50) && (angle_adjusted > -50)) // Is robot ready (upright?)
+    if ((angle_adjusted < ANGLE_TOLERANCE) && (angle_adjusted > -ANGLE_TOLERANCE))
     {
-      // NORMAL MODE
+      digitalWrite(MOTOR_EN_PIN, LOW);
       setMotorSpeed(control_output);
       digitalWrite(LED_BUILTIN, LOW);
     }
-    else // Robot not ready (flat), angle > 70º => ROBOT OFF
+    else 
     {
       Serial.println("--------------- ROBOT OUT OF BOUNDS ---------------");
+      digitalWrite(MOTOR_EN_PIN, HIGH);
       setMotorSpeed(0);
       digitalWrite(LED_BUILTIN, HIGH);
       PID_errorSum = 0; // Reset PID I term
     }
-  // }
+  }
 }
 
-void readBattery()
-{
-  battery = (battery * 9 + (analogRead(5) / 8)) / 10; // output : Battery voltage*10 (aprox) and filtered
-}
