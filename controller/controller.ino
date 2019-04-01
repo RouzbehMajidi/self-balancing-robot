@@ -6,7 +6,6 @@
 #define ZERO_SPEED 65535
 #define I2C_SPEED 400000L
 #define RAD2GRAD 57.2957795
-#define GRAD2RAD 0.01745329251994329576923690768489
 #define GYRO_CALIBRATION_TIME 20000 //ms
 
 // Control
@@ -17,7 +16,7 @@
 
 #define MICROSTEPPING 16
 
-#define MAX_ACCEL 7
+#define MAX_ACCELERATION 7
 #define MAX_CONTROL_OUTPUT_L1 100
 #define MAX_CONTROL_OUTPUT_L2 200
 
@@ -82,7 +81,6 @@ float control_output;
 // DMP FUNCTIONS
 void dmpSetSensorFusionAccelGain(uint8_t gain)
 {
-  // INV_KEY_0_96
   mpu.setMemoryBank(0);
   mpu.setMemoryStartAddress(0x60);
   mpu.writeMemoryByte(0);
@@ -256,30 +254,30 @@ void setMotorSpeed(float controlInput)
   int16_t speed_1, speed_2;
   int8_t dir_1, dir_2;
 
-  if ((speed_M1 - controlInput) > MAX_ACCEL)
-    speed_M1 -= MAX_ACCEL;
-  else if ((speed_M1 - controlInput) < -MAX_ACCEL)
-    speed_M1 += MAX_ACCEL;
+  if ((speed_M1 - controlInput) > MAX_ACCELERATION)
+    speed_M1 -= MAX_ACCELERATION;
+  else if ((speed_M1 - controlInput) < -MAX_ACCELERATION)
+    speed_M1 += MAX_ACCELERATION;
   else
     speed_M1 = controlInput;
 
-  if ((speed_M2 - controlInput) > MAX_ACCEL)
-    speed_M2 -= MAX_ACCEL;
-  else if ((speed_M2 - controlInput) < -MAX_ACCEL)
-    speed_M2 += MAX_ACCEL;
+  if ((speed_M2 - controlInput) > MAX_ACCELERATION)
+    speed_M2 -= MAX_ACCELERATION;
+  else if ((speed_M2 - controlInput) < -MAX_ACCELERATION)
+    speed_M2 += MAX_ACCELERATION;
   else
     speed_M2 = controlInput;
 
-#if MICROSTEPPING == 16 // 1/16
-  speed_1 = speed_M1 * 46; // Adjust factor from control output speed to real motor speed in steps/second
+#if MICROSTEPPING == 16
+  // 1/16 MICROSTEPPING
+  speed_1 = speed_M1 * 46;
   speed_2 = speed_M2 * 46;
-#elif MICROSTEPPING == 8 // 1/8
-  speed_1 = speed_M1 * 23;
-  speed_2 = speed_M2 * 23;
-#elif MICROSTEPPING == 1 // Full
+#else
+  // 1/8 MICROSTEPPING
   speed_1 = speed_M1 * 23;
   speed_2 = speed_M2 * 23;
 #endif
+
   if (speed_1 == 0)
   {
     timer_period_1 = ZERO_SPEED;
@@ -391,9 +389,10 @@ void setup()
   }
   else
   {
+    // DMP INIT ERROR
     // 1 = initial memory load failed
     // 2 = DMP configuration updates failed
-    Serial.print("DMP ERROR (");
+    Serial.print("DMP INIT ERROR (");
     Serial.print(devStatus);
     Serial.println(")");
 
@@ -476,7 +475,6 @@ void loop()
       control_output = constrain(control_output, -MAX_CONTROL_OUTPUT_L2, MAX_CONTROL_OUTPUT_L2);
     }
 
-
     Serial.print(angle_adjusted);
     Serial.print(" ");
     Serial.println(control_output);
@@ -497,4 +495,3 @@ void loop()
     }
   }
 }
-
